@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"github.com/atotto/clipboard"
 	"github.com/olekukonko/tablewriter"
+	"gopkg.in/AlecAivazis/survey.v1"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"os"
-	"strconv"
 	"strings"
 )
 
+//Emoji stores a struct to match keywords to an emoji
 type Emoji struct {
 	Keywords []string `json:"keywords"`
 	Emoji    string   `json:"emoji"`
 }
 
+//map the keywords to emojis
 var keywordLookUp map[string][]Emoji
+
+//store a list of the emojis
 var emojis []Emoji
 
 func buildKeywordLookupMap() {
@@ -29,14 +33,8 @@ func buildKeywordLookupMap() {
 }
 
 func init() {
-	/*
-		file, e := ioutil.ReadFile("./emojis.json")
-		if e != nil {
-			fmt.Printf("File error: %v\n", e)
-			os.Exit(1)
-		}
-	*/
 
+	//read in the emoji "database"
 	if err := json.Unmarshal(MustAsset("emojis.json"), &emojis); err != nil {
 		panic(err)
 	}
@@ -48,8 +46,8 @@ func init() {
 var (
 	app = kingpin.New("asciimoji", "Look up ASCII emojis")
 
-	list_all = app.Flag("list-all", "list all available emojis").Short('l').Bool()
-	search   = app.Flag("search", "search all available emojis").Short('s').Strings()
+	listAll = app.Flag("list-all", "list all available emojis").Short('l').Bool()
+	search  = app.Flag("search", "search all available emojis").Short('s').Strings()
 
 	query = app.Arg("lookup", "the keyword to lookup.").String()
 )
@@ -61,7 +59,7 @@ func main() {
 	app.UsageTemplate(kingpin.SeparateOptionalFlagsUsageTemplate)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
-	if *list_all {
+	if *listAll {
 		listEmojis()
 		os.Exit(0)
 	}
@@ -81,6 +79,7 @@ func main() {
 
 }
 
+//list emojis with keywords that match a specified search term
 func searchEmoji(query string) {
 
 	table := tablewriter.NewWriter(os.Stdout)
@@ -95,50 +94,61 @@ func searchEmoji(query string) {
 	table.Render()
 }
 
+//get the emoji(s) for a keyword
 func getEmoji(query string) {
 
-	emojis, ok := keywordLookUp[query]
+	emojiResults, ok := keywordLookUp[query]
 	if !ok {
 		fmt.Println("emoji not found :(")
 		os.Exit(0)
 	}
 
-	var emoji Emoji
-	if len(emojis) > 1 {
-		for {
-			for i, emj := range emojis {
-				fmt.Printf("%d) %s\n", i+1, emj.Emoji)
-			}
+	var emoji string
 
-			var raw string
-			fmt.Printf("choice [1-%d]: ", len(emojis))
-			if _, err := fmt.Scanf("%s", &raw); err == nil {
-				if choice, err := strconv.Atoi(raw); err == nil {
-					if choice >= 1 && choice <= len(emojis) {
-						emoji = emojis[choice-1]
-						break
-					}
-				}
-			}
-
-			fmt.Println("invalid choice, please try again")
+	// if there is more than one emoji that matches the keyword, ask the user to pick which one they want
+	if len(emojiResults) > 1 {
+		var emojiList = make([]string, 0)
+		for _, e := range emojiResults {
+			emojiList = append(emojiList, e.Emoji)
 		}
 
+		var qs = []*survey.Question{
+			{
+				Name: "emoji_answer",
+				Prompt: &survey.Select{
+					Message: "Choose a emoji:",
+					Options: emojiList,
+				},
+			},
+		}
+
+		answer := struct {
+			EmojiAnswer string `survey:"emoji_answer"`
+		}{}
+
+		err := survey.Ask(qs, &answer)
+		if err != nil {
+			fmt.Println(err.Error())
+			return
+		}
+
+		emoji = answer.EmojiAnswer
+
 	} else {
-		emoji = emojis[0]
+		emoji = emojiResults[0].Emoji
 	}
 
-	if err := clipboard.WriteAll(emoji.Emoji); err != nil {
+	// copy the selected emoji to the clipboard
+	if err := clipboard.WriteAll(emoji); err != nil {
 		panic(err)
 	}
-	fmt.Printf("copied %s\n", emoji.Emoji)
+	fmt.Printf("copied %s\n", emoji)
 }
 
+//list all available emojis
 func listEmojis() {
 	table := tablewriter.NewWriter(os.Stdout)
 	for _, emoji := range emojis {
-		//fmt.Println(emoji.Emoji,"\t",emoji.Keywords)
-
 		table.Append([]string{emoji.Emoji, strings.Join(emoji.Keywords, ", ")})
 	}
 	table.Render()
